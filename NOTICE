@@ -1,0 +1,9 @@
+Nick's Badge
+Copyright 2026 Nixntric
+
+effects.py ports the preview animations of FOSSASIA's Badge Magic app
+(https://github.com/fossasia/badgemagic-app), Apache License 2.0,
+Copyright FOSSASIA and the Badge Magic contributors.
+
+The badge's USB protocol follows FOSSASIA's badgemagic-firmware
+(https://github.com/fossasia/badgemagic-firmware), Apache License 2.0.

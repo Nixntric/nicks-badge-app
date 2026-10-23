@@ -1,0 +1,7 @@
+__pycache__/
+# Firmware source, toolchain and images live elsewhere (see README)
+firmware/badgemagic-firmware/
+firmware/tools/
+firmware/images/
+release/
+*.bin

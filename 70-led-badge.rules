@@ -1,0 +1,4 @@
+# LED name badge (WCH CH583, 44x11): let logged-in users write to its hidraw node
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0416", ATTRS{idProduct}=="5020", MODE="0660", TAG+="uaccess"
+# Same badge in WCH ISP (flash) mode, for wchisp
+SUBSYSTEM=="usb", ATTR{idVendor}=="4348", ATTR{idProduct}=="55e0", MODE="0660", TAG+="uaccess"

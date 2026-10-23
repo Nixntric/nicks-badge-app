@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Nick's Badge
+Comment=Send messages to the LED name badge
+Exec=/usr/bin/python3 "@APPDIR@/badge_gui.py"
+Icon=dev.nick.Nametag
+Terminal=false
+Categories=Utility;
+Keywords=led;badge;nametag;sign;
+StartupWMClass=dev.nick.Nametag
