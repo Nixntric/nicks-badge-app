@@ -57,10 +57,11 @@ def clean_border(border):
     return b
 
 
-def render(message, tall_ok):
+def render(message, tall_ok, max_payload=badge.MAX_PAYLOAD):
     """Render a message; images keep their full height in up/down mode if tall_ok."""
     tall = tall_ok and message["mode"] in ("up", "down")
-    return badge.render_message(message["text"], RENDER_OPTS, tall=tall)
+    return badge.render_message(message["text"], RENDER_OPTS,
+                                tall=badge.tall_max_height(max_payload) if tall else 0)
 
 
 class Preview(Gtk.DrawingArea):
@@ -81,10 +82,10 @@ class Preview(Gtk.DrawingArea):
         self.set_draw_func(self.draw)
         self.add_tick_callback(lambda *_: self.queue_draw() or GLib.SOURCE_CONTINUE)
 
-    def show(self, message, bitmap=None, tall_ok=True):
+    def show(self, message, bitmap=None, tall_ok=True, max_payload=badge.MAX_PAYLOAD):
         self.message = message
         if bitmap is None:
-            bitmap = render(message, tall_ok)
+            bitmap = render(message, tall_ok, max_payload)
         # Show what build_packet() sends: lit backgrounds inverted plus a flag, and
         # blank sides trimmed for the firmware's centering.
         sent, self.invert = badge.prepare(bitmap, message["mode"], tall_ok)
@@ -382,7 +383,7 @@ class MessageCard:
             self.entry.grab_focus()
 
     def budget(self):
-        return imageconv.frame_budget(self.window.other_bytes(self))
+        return imageconv.frame_budget(self.window.other_bytes(self), self.window.max_payload)
 
     def image_changed(self):
         self.image = self.image_rows.read(self.image)
@@ -402,7 +403,7 @@ class MessageCard:
             light_on=image["light_on"], autocontrast=image["autocontrast"],
             animate=image["animate"], start=image["start"],
             end=image["end"] if image["end"] is not None else self.source.duration,
-            count=image["frames"])
+            count=image["frames"], tall_max=badge.tall_max_height(self.window.max_payload))
         stem = "".join(c for c in os.path.splitext(os.path.basename(image["source"]))[0]
                        if c.isalnum() or c in "-_")[:40] or "image"
         path = imageconv.save(bitmap, IMAGES_DIR, stem)
@@ -433,7 +434,7 @@ class MessageCard:
             self.image_rows.expander.set_subtitle(f"{name} · original not found, so these can't change")
             return
         if bitmap is None:
-            bitmap = render(self.message(), self.window.tall_ok)
+            bitmap = render(self.message(), self.window.tall_ok, self.window.max_payload)
         mode = MODE_KEYS[self.mode.get_selected()]
         if mode == "animation":
             frames = bitmap.width // effects.ANIMATION_FRAME_WIDTH
@@ -454,6 +455,7 @@ class Window(Adw.ApplicationWindow):
         self.cards = []
         self.active = None
         self.tall_ok = True  # whether the last badge seen runs our tall-image firmware
+        self.max_payload = badge.MAX_PAYLOAD  # most bytes the last badge seen takes
         self.created_images = set()
         self.state = self.load_state()
         self.profile_key = self.state["current"]
@@ -557,13 +559,13 @@ class Window(Adw.ApplicationWindow):
 
     def other_bytes(self, card):
         """Bytes the other messages take, which limits how much an image can have."""
-        return sum(len(render(c.message(), self.tall_ok).to_bytes())
+        return sum(len(render(c.message(), self.tall_ok, self.max_payload).to_bytes())
                    for c in self.cards if c is not card)
 
     def set_active(self, card):
         self.active = card
         message = card.message()
-        self.preview.show(message, tall_ok=self.tall_ok)
+        self.preview.show(message, tall_ok=self.tall_ok, max_payload=self.max_payload)
         n = self.cards.index(card) + 1 if card in self.cards else 1
         caption = f"Message {n} · {MODE_LABELS[message['mode']]}"
         if self.preview.rows > badge.HEIGHT:
@@ -668,6 +670,14 @@ class Window(Adw.ApplicationWindow):
             self.tall_ok = not self.tall_ok
             if self.active:
                 self.set_active(self.active)
+        if device and badge.max_payload(self.connected[1]) != self.max_payload:
+            self.max_payload = badge.max_payload(self.connected[1])
+            for card in self.cards:  # convert images again within the new limits
+                if card.image and card.source:
+                    card.image_rows.show(card.image, card.source, card.budget())
+                    card.convert()
+            if self.active:
+                self.set_active(self.active)
         self.update_title()
         return GLib.SOURCE_CONTINUE
 
@@ -680,10 +690,11 @@ class Window(Adw.ApplicationWindow):
             device = badge.find_device()
             if not device:
                 raise badge.BadgeError("Badge not found — is it plugged in?")
-            if badge.badge_identity(device)[0] != self.profile_key:
+            key, version = badge.badge_identity(device)
+            if key != self.profile_key:
                 raise badge.BadgeError("A different badge is plugged in — wait a moment and try again")
             tall_ok = badge.supports_tall(device)
-            bitmaps = [render(m, tall_ok) for m in messages]
+            bitmaps = [render(m, tall_ok, badge.max_payload(version)) for m in messages]
             payload = badge.build_packet(
                 bitmaps,
                 [m["mode"] for m in messages],
@@ -693,6 +704,7 @@ class Window(Adw.ApplicationWindow):
                 BRIGHTNESS_LEVELS[self.brightness.get_selected()],
                 invert_ok=tall_ok,
                 borders=[m["border"] for m in messages],
+                max_payload=badge.max_payload(version),
             )
             badge.send(payload, device)
         except badge.BadgeError as e:

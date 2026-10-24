@@ -1,5 +1,5 @@
 #!/bin/bash
-# Flash a B1133C badge as soon as it shows up in flash mode (WCH ISP).
+# Flash a B1144C badge as soon as it shows up in flash mode (WCH ISP).
 # Usage: recover.sh <firmware.bin>, then hold the badge's lower key for 5 seconds
 # (on Nick's badge firmware), or plug it in while holding it.
 cd "$(dirname "$0")"

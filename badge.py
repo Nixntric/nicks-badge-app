@@ -23,7 +23,10 @@ VID, PID = 0x0416, 0x5020
 WIDTH, HEIGHT = 44, 11
 MAX_MESSAGES = 8
 MAX_PAYLOAD = 8192
+BIG_PAYLOAD = 32256  # our firmware from v1.4.0 plays messages from its data flash, not RAM
+BIG_FIRMWARE = (1, 4, 0)
 TALL_MAX_HEIGHT = 1100  # 100 bands; a 44px-wide image this tall is 6.6 KB
+BIG_TALL_MAX_HEIGHT = 2805  # 255 bands, the most a header byte holds; 17 KB at 44px wide
 TALL_PRODUCT = "Badge Magic Tall"  # USB product name of firmware that understands tall images
 
 MODES = {
@@ -185,16 +188,18 @@ def text_bitmap_ttf(text, font_path, size):
     return image_to_bitmap(img)
 
 
-def image_bitmap(path, threshold, invert, tall=False):
-    """Load an image scaled to 11px tall, or with tall=True, at most 44px wide and full height."""
+def image_bitmap(path, threshold, invert, tall=0):
+    """Load an image scaled to 11px tall, or with tall set, at most 44px wide and up to
+    `tall` pixels high (True for TALL_MAX_HEIGHT)."""
     from PIL import Image
 
     img = Image.open(path).convert("L")
     if tall and img.height * WIDTH > HEIGHT * img.width:  # proportionally taller than the badge
         if img.width > WIDTH:
             img = img.resize((WIDTH, round(img.height * WIDTH / img.width)), Image.LANCZOS)
-        if img.height > TALL_MAX_HEIGHT:
-            img = img.crop((0, 0, img.width, TALL_MAX_HEIGHT))
+        max_height = TALL_MAX_HEIGHT if tall is True else tall
+        if img.height > max_height:
+            img = img.crop((0, 0, img.width, max_height))
     elif img.height != HEIGHT:
         img = img.resize((max(1, round(img.width * HEIGHT / img.height)), HEIGHT), Image.LANCZOS)
     img = img.point(lambda p: 255 if (p < threshold) != invert else 0).convert("1")
@@ -207,10 +212,11 @@ def image_to_bitmap(img):
                   height=img.height)
 
 
-def render_message(msg, args, tall=False):
+def render_message(msg, args, tall=0):
     """A message is text with optional inline :icon: tokens, or '@path' for an image file.
 
-    tall: let images keep their height (for up/down scrolling on the custom firmware).
+    tall: let images keep their height, up to this many pixels (for up/down scrolling on
+    the custom firmware).
     """
     if msg.startswith("@") and os.path.isfile(msg[1:]):
         return image_bitmap(msg[1:], args.threshold, args.invert, tall)
@@ -258,7 +264,19 @@ def prepare(bmp, mode, invert_ok):
     return bmp, inverted
 
 
-def build_packet(bitmaps, modes, speeds, blink, ants, brightness, invert_ok=False, borders=None):
+def max_payload(version):
+    """Most bytes the badge takes in one upload, from its firmware version (see badge_identity())."""
+    m = re.match(r"v?(\d+)\.(\d+)\.(\d+)", version or "")
+    return BIG_PAYLOAD if m and tuple(map(int, m.groups())) >= BIG_FIRMWARE else MAX_PAYLOAD
+
+
+def tall_max_height(max_payload):
+    """Tallest image worth sending to a badge that takes max_payload bytes."""
+    return BIG_TALL_MAX_HEIGHT if max_payload >= BIG_PAYLOAD else TALL_MAX_HEIGHT
+
+
+def build_packet(bitmaps, modes, speeds, blink, ants, brightness, invert_ok=False, borders=None,
+                 max_payload=MAX_PAYLOAD):
     """invert_ok: the badge runs our custom firmware, which can show a message inverted.
     Bitmaps with a lit background are then sent inverted with the invert flag, so the
     space around them (while scrolling, or beside narrow images) lights up too.
@@ -295,8 +313,8 @@ def build_packet(bitmaps, modes, speeds, blink, ants, brightness, invert_ok=Fals
     header[38:44] = bytes([now.year % 100, now.month, now.day, now.hour, now.minute, now.second])
     payload = bytes(header) + bytes(data)
     payload += bytes(-len(payload) % 64)
-    if len(payload) > MAX_PAYLOAD:
-        raise BadgeError(f"Too much content: {len(payload)} bytes (max {MAX_PAYLOAD}). Shorten the messages.")
+    if len(payload) > max_payload:
+        raise BadgeError(f"Too much content: {len(payload)} bytes (max {max_payload}). Shorten the messages.")
     return payload
 
 
@@ -417,10 +435,13 @@ def main():
     if not (device or args.preview):
         sys.exit(f"Badge not found (USB {VID:04x}:{PID:04x}). Is it plugged in?")
     tall_ok = args.preview or supports_tall(device)
-    bitmaps = [render_message(m, args, tall=tall_ok and modes[i] in ("up", "down"))
+    limit = BIG_PAYLOAD if args.preview else max_payload(badge_identity(device)[1])
+    tall = tall_max_height(limit) if tall_ok else 0
+    bitmaps = [render_message(m, args, tall=tall if modes[i] in ("up", "down") else 0)
                for i, m in enumerate(args.messages)]
     try:
-        payload = build_packet(bitmaps, modes, speeds, blink, ants, args.brightness, invert_ok=tall_ok)
+        payload = build_packet(bitmaps, modes, speeds, blink, ants, args.brightness, invert_ok=tall_ok,
+                               max_payload=limit)
     except BadgeError as e:
         sys.exit(str(e))
 

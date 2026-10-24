@@ -5,7 +5,7 @@ import os
 
 from PIL import Image, ImageOps
 
-from badge import HEIGHT, MAX_PAYLOAD, TALL_MAX_HEIGHT, WIDTH, Bitmap, image_to_bitmap
+from badge import BIG_TALL_MAX_HEIGHT, HEIGHT, MAX_PAYLOAD, TALL_MAX_HEIGHT, WIDTH, Bitmap, image_to_bitmap
 from effects import ANIMATION_FRAME_WIDTH
 
 FITS = {
@@ -18,13 +18,13 @@ FITS = {
 }
 FRAME_BYTES = ANIMATION_FRAME_WIDTH // 8 * HEIGHT  # 66 bytes per animation frame
 MAX_WIDTH = 600  # 8KB holds ~700 columns total, so leave room for other messages
-STILL_BOX = (MAX_WIDTH * 4, TALL_MAX_HEIGHT * 4)  # keep enough resolution for a good downscale
+STILL_BOX = (MAX_WIDTH * 4, BIG_TALL_MAX_HEIGHT * 4)  # keep enough resolution for a good downscale
 FRAME_BOX = (WIDTH * 8, HEIGHT * 8)
 
 
-def frame_budget(other_bytes=0):
+def frame_budget(other_bytes=0, max_payload=MAX_PAYLOAD):
     """How many animation frames fit alongside other_bytes of other messages."""
-    return max(1, (MAX_PAYLOAD - 64 - other_bytes) // FRAME_BYTES)
+    return max(1, (max_payload - 64 - other_bytes) // FRAME_BYTES)
 
 
 class Source:
@@ -93,7 +93,7 @@ def _binarize(gray, threshold, dither):
     return gray.point(lambda p: 255 if p < threshold else 0).convert("1")
 
 
-def _resize(gray, fit):
+def _resize(gray, fit, tall_max=TALL_MAX_HEIGHT):
     w, h = gray.size
     if fit == "height":
         return gray.resize((max(1, min(MAX_WIDTH, round(w * HEIGHT / h))), HEIGHT), Image.LANCZOS)
@@ -104,7 +104,7 @@ def _resize(gray, fit):
         out.paste(small, ((WIDTH - small.width) // 2, (HEIGHT - small.height) // 2))
         return out
     if fit == "tall":
-        return gray.resize((WIDTH, max(HEIGHT, min(TALL_MAX_HEIGHT, round(h * WIDTH / w)))),
+        return gray.resize((WIDTH, max(HEIGHT, min(tall_max, round(h * WIDTH / w)))),
                            Image.LANCZOS)
     if fit == "fill":
         return ImageOps.fit(gray, (WIDTH, HEIGHT), Image.LANCZOS)
@@ -126,7 +126,7 @@ def pan_positions(source):
 
 
 def convert(source, fit, threshold=128, dither=False, light_on=False, autocontrast=True,
-            animate=False, start=0.0, end=None, count=None):
+            animate=False, start=0.0, end=None, count=None, tall_max=TALL_MAX_HEIGHT):
     """Convert to a Bitmap. Animations (GIF frames or a pan) pack frames into 48px slots."""
     prep = lambda g: _prepare(g, autocontrast, light_on)  # noqa: E731
     binarize = lambda g: _binarize(g, threshold, dither)  # noqa: E731
@@ -142,7 +142,7 @@ def convert(source, fit, threshold=128, dither=False, light_on=False, autocontra
         return _frames_to_bitmap([whole.crop((0, t, WIDTH, t + HEIGHT)) for t in tops])
 
     if fit == "tall" or not (animate and source.animated):
-        return image_to_bitmap(binarize(_resize(prep(source.first), fit)))
+        return image_to_bitmap(binarize(_resize(prep(source.first), fit, tall_max)))
 
     end = source.duration if end is None else end
     indices = source.sample(start, end, count or frame_budget())

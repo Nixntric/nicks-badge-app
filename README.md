@@ -77,7 +77,8 @@ again.
 
 ## Limits
 
-- Uploads are about 8 KB in total, so animations get at most 123 frames.
+- Uploads are about 8 KB in total, so animations get at most 123 frames. With Nick's badge
+  firmware v1.4.0 or later it's 32 KB: about 488 frames, or tall images up to 2,805 pixels.
 - Animation frames change about every 0.65 s at speed 4, and about every 0.23 s at
   speed 8.
 
